@@ -1,6 +1,6 @@
 // Offline check: renders a plucked test note through the plugin to a WAV,
 // prints level stats, and saves a PNG of the editor.
-// Usage: HairyFuzzRenderTest <outDir>
+// Usage: PhilsFuzzRenderTest <outDir>
 #include "../Source/PluginProcessor.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -31,9 +31,16 @@ int main (int argc, char** argv)
     const double sr = 48000.0;
     const int block = 256;
 
-    struct Setting { const char* name; float fuzz, filter, volume; };
-    const Setting settings[] = { { "default", 0.7f, 0.35f, 0.7f }, { "max", 1.0f, 0.0f, 0.7f },
-                                 { "low", 0.0f, 0.5f, 0.7f }, { "dark", 0.8f, 1.0f, 0.7f } };
+    struct Setting { juce::String name; float fuzz, filter, volume; int mode; bool silicon; };
+    std::vector<Setting> settings;
+    for (int m = 0; m < HairyFuzzProcessor::modeNames.size(); ++m)
+        for (int si = 0; si < 2; ++si)
+        {
+            const auto base = HairyFuzzProcessor::modeNames[m].toLowerCase() + (si ? "_si" : "_ge");
+            settings.push_back ({ base, 0.7f, 0.35f, 0.7f, m, si == 1 });
+            settings.push_back ({ base + "_max", 1.0f, 0.0f, 0.7f, m, si == 1 });
+            settings.push_back ({ base + "_low", 0.0f, 0.35f, 0.7f, m, si == 1 });
+        }
 
     for (auto& s : settings)
     {
@@ -42,6 +49,8 @@ int main (int argc, char** argv)
         p.apvts.getParameter ("fuzz")->setValueNotifyingHost (s.fuzz);
         p.apvts.getParameter ("filter")->setValueNotifyingHost (s.filter);
         p.apvts.getParameter ("volume")->setValueNotifyingHost (s.volume);
+        p.apvts.getParameter ("mode")->setValueNotifyingHost ((float) s.mode / (float) (HairyFuzzProcessor::modeNames.size() - 1));
+        p.apvts.getParameter ("silicon")->setValueNotifyingHost (s.silicon ? 1.0f : 0.0f);
         p.prepareToPlay (sr, block);
 
         auto audio = makePluck (sr, 3.0);
@@ -57,12 +66,12 @@ int main (int argc, char** argv)
         for (int i = 0; i < audio.getNumSamples(); ++i)
             finite &= std::isfinite (audio.getSample (0, i));
 
-        std::printf ("%-8s inPeak=%.3f outPeak=%.3f outRMS=%.3f latency=%d finite=%d\n", s.name, inPeak,
+        std::printf ("%-18s inPeak=%.3f outPeak=%.3f outRMS=%.3f latency=%d finite=%d\n", s.name.toRawUTF8(), inPeak,
                      audio.getMagnitude (0, 0, audio.getNumSamples()), audio.getRMSLevel (0, 0, audio.getNumSamples()),
                      p.getLatencySamples(), (int) finite);
 
         juce::WavAudioFormat wav;
-        auto file = outDir.getChildFile (juce::String ("render_") + s.name + ".wav");
+        auto file = outDir.getChildFile ("render_" + s.name + ".wav");
         file.deleteFile();
         std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (file), sr, 2, 24, {}, 0));
         w->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());

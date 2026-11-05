@@ -1,11 +1,15 @@
 #include "PluginEditor.h"
+#include "BinaryData.h"
 
 namespace
 {
-constexpr int editorWidth = 360;
-constexpr int editorHeight = 520;
+constexpr int editorWidth = 380;
+constexpr int editorHeight = 750;
 constexpr int knobSize = 96;
 constexpr int knobTop = 62;
+
+constexpr float modeCentreX = 112.0f, modeCentreY = 252.0f, modeSize = 68.0f, modeLabelRadius = 58.0f;
+constexpr float selectorStart = 240.0f, selectorEnd = 480.0f; // degrees, clockwise from 12 o'clock
 
 const juce::Colour enclosureTop { 0xff1f1f1f };
 const juce::Colour enclosureBottom { 0xff0b0b0b };
@@ -32,10 +36,15 @@ void drawScrew (juce::Graphics& g, juce::Point<float> c)
 //==============================================================================
 void PedalLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
                                          float sliderPos, float startAngle, float endAngle,
-                                         juce::Slider&)
+                                         juce::Slider& slider)
 {
     using namespace juce;
     auto bounds = Rectangle<float> ((float) x, (float) y, (float) width, (float) height).reduced (4.0f);
+    if (slider.getName() == "mode")
+    {
+        drawSelector (g, bounds, startAngle + sliderPos * (endAngle - startAngle));
+        return;
+    }
     const auto centre = bounds.getCentre();
     const float outer = jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     const float knobR = outer * 0.74f;
@@ -83,6 +92,65 @@ void PedalLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int wi
                   centre.getPointOnCircumference (knobR * 0.95f, angle) }, 3.5f);
 }
 
+void PedalLookAndFeel::drawSelector (juce::Graphics& g, juce::Rectangle<float> bounds, float angle)
+{
+    using namespace juce;
+    const auto c = bounds.getCentre();
+    const float r = jmin (bounds.getWidth(), bounds.getHeight()) * 0.42f;
+
+    g.setColour (Colours::black.withAlpha (0.6f));
+    g.fillEllipse (c.x - r + 2.0f, c.y - r + 3.0f, 2 * r, 2 * r);
+
+    // "Chicken head" pointer knob: a round hub with a tapered pointer.
+    const auto toKnob = AffineTransform::rotation (angle).translated (c);
+    Path hub;
+    hub.addEllipse (-r * 0.72f, -r * 0.72f, r * 1.44f, r * 1.44f);
+    Path pointer;
+    pointer.startNewSubPath (-r * 0.5f, r * 0.2f);
+    pointer.lineTo (-r * 0.17f, -r * 1.1f);
+    pointer.quadraticTo (0.0f, -r * 1.25f, r * 0.17f, -r * 1.1f);
+    pointer.lineTo (r * 0.5f, r * 0.2f);
+    pointer.closeSubPath();
+    hub.applyTransform (toKnob);
+    pointer.applyTransform (toKnob);
+
+    const ColourGradient body (Colour (0xff3a3a3a), c.x, c.y - r, Colour (0xff070707), c.x, c.y + r, false);
+    for (auto* part : { &pointer, &hub })
+    {
+        g.setGradientFill (body);
+        g.fillPath (*part);
+        g.setColour (Colour (0xff555555));
+        g.strokePath (*part, PathStrokeType (1.0f));
+    }
+    g.setGradientFill (body);
+    g.fillEllipse (c.x - r * 0.68f, c.y - r * 0.68f, r * 1.36f, r * 1.36f);
+
+    g.setColour (silkscreen);
+    g.drawLine ({ c.getPointOnCircumference (r * 0.2f, angle), c.getPointOnCircumference (r * 1.0f, angle) }, 2.5f);
+}
+
+//==============================================================================
+void ToggleSwitch::paintButton (juce::Graphics& g, bool, bool)
+{
+    using namespace juce;
+    auto b = getLocalBounds().toFloat();
+    const auto c = b.getCentre();
+    const bool down = getToggleState();
+
+    // Bushing and nut.
+    g.setGradientFill (ColourGradient (Colour (0xffdcdcdc), c.x - 12, c.y - 12, Colour (0xff5a5a5a), c.x + 12, c.y + 12, false));
+    g.fillEllipse (c.x - 12, c.y - 12, 24, 24);
+    g.setColour (Colour (0xff222222));
+    g.fillEllipse (c.x - 6, c.y - 6, 12, 12);
+
+    // Lever.
+    const float tipY = down ? b.getBottom() - 6.0f : b.getY() + 6.0f;
+    g.setColour (Colour (0xffb8b8b8));
+    g.drawLine (c.x, c.y, c.x, tipY, 6.0f);
+    g.setGradientFill (ColourGradient (Colour (0xfff7f7f7), c.x - 5, tipY - 5, Colour (0xff8a8a8a), c.x + 5, tipY + 5, false));
+    g.fillEllipse (c.x - 5.5f, tipY - 5.5f, 11.0f, 11.0f);
+}
+
 //==============================================================================
 void Footswitch::paintButton (juce::Graphics& g, bool isMouseOver, bool isButtonDown)
 {
@@ -121,6 +189,13 @@ HairyFuzzEditor::HairyFuzzEditor (HairyFuzzProcessor& p)
     setupKnob (fuzzKnob);
     setupKnob (filterKnob);
     setupKnob (volumeKnob);
+    setupKnob (modeKnob);
+    modeKnob.setName ("mode");
+    modeKnob.setRotaryParameters (juce::degreesToRadians (selectorStart), juce::degreesToRadians (selectorEnd), true);
+    modeKnob.setVelocityBasedMode (false);
+    modeKnob.setMouseDragSensitivity (300);
+    addAndMakeVisible (diodeSwitch);
+    diodeSwitch.setTooltip ("Germanium (up) / Silicon (down)");
     addAndMakeVisible (footswitch);
     footswitch.setTooltip ("Bypass");
 
@@ -128,6 +203,10 @@ HairyFuzzEditor::HairyFuzzEditor (HairyFuzzProcessor& p)
     filterAttach = std::make_unique<SliderAttachment> (processor.apvts, "filter", filterKnob);
     volumeAttach = std::make_unique<SliderAttachment> (processor.apvts, "volume", volumeKnob);
     bypassAttach = std::make_unique<ButtonAttachment> (processor.apvts, "bypass", footswitch);
+    modeAttach = std::make_unique<SliderAttachment> (processor.apvts, "mode", modeKnob);
+    diodeAttach = std::make_unique<ButtonAttachment> (processor.apvts, "silicon", diodeSwitch);
+
+    portrait = juce::ImageCache::getFromMemory (BinaryData::phil_png, BinaryData::phil_pngSize);
 
     setSize (editorWidth, editorHeight);
     startTimerHz (30);
@@ -135,7 +214,7 @@ HairyFuzzEditor::HairyFuzzEditor (HairyFuzzProcessor& p)
 
 HairyFuzzEditor::~HairyFuzzEditor()
 {
-    for (auto* k : { &fuzzKnob, &filterKnob, &volumeKnob })
+    for (auto* k : { &fuzzKnob, &filterKnob, &volumeKnob, &modeKnob })
         k->setLookAndFeel (nullptr);
 }
 
@@ -149,6 +228,28 @@ void HairyFuzzEditor::setupKnob (juce::Slider& knob)
     addAndMakeVisible (knob);
 }
 
+juce::Rectangle<float> HairyFuzzEditor::modeLabelBounds (int index) const
+{
+    const float step = (selectorEnd - selectorStart) / (float) (HairyFuzzProcessor::modeNames.size() - 1);
+    const float a = juce::degreesToRadians (selectorStart + step * (float) index);
+    const juce::Point<float> c (modeCentreX, modeCentreY);
+    const auto p = c.getPointOnCircumference (modeLabelRadius, a);
+    return juce::Rectangle<float> (58.0f, 14.0f).withCentre (p);
+}
+
+void HairyFuzzEditor::mouseDown (const juce::MouseEvent& e)
+{
+    for (int i = 0; i < HairyFuzzProcessor::modeNames.size(); ++i)
+        if (modeLabelBounds (i).contains (e.position))
+        {
+            auto* param = processor.apvts.getParameter ("mode");
+            param->beginChangeGesture();
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) i));
+            param->endChangeGesture();
+            return;
+        }
+}
+
 void HairyFuzzEditor::timerCallback()
 {
     const bool on = ! footswitch.getToggleState();
@@ -156,6 +257,13 @@ void HairyFuzzEditor::timerCallback()
     {
         ledOn = on;
         repaint (ledArea.expanded (16.0f).toNearestInt());
+    }
+
+    const int mode = juce::roundToInt (modeKnob.getValue());
+    if (mode != shownMode)
+    {
+        shownMode = mode;
+        repaint (juce::Rectangle<float> (modeCentreX - 100.0f, modeCentreY - 80.0f, 200.0f, 160.0f).toNearestInt());
     }
 }
 
@@ -206,17 +314,44 @@ void HairyFuzzEditor::paint (juce::Graphics& g)
                                        ledArea.getBottomRight(), true));
     g.fillEllipse (ledArea);
 
-    // Title block.
-    auto title = Rectangle<float> (box.getX(), 236.0f, box.getWidth(), 120.0f);
+    // Mode selector labels (click a label to jump to it).
+    g.setFont (boldFont (10.5f));
+    for (int i = 0; i < HairyFuzzProcessor::modeNames.size(); ++i)
+    {
+        const bool active = i == roundToInt (modeKnob.getValue());
+        g.setColour (active ? Colour (0xffffb347) : silkscreen.withAlpha (0.75f));
+        g.drawText (HairyFuzzProcessor::modeNames[i].toUpperCase(), modeLabelBounds (i), Justification::centred);
+    }
+
+    // Diode switch labels.
+    const auto sw = diodeSwitch.getBounds().toFloat();
+    g.setFont (boldFont (11.0f));
     g.setColour (silkscreen);
-    g.setFont (boldFont (58.0f).withHorizontalScale (0.92f));
-    g.drawText ("HAIRY", title.removeFromTop (58.0f), Justification::centred);
-    g.setFont (boldFont (58.0f).withHorizontalScale (0.92f));
-    g.drawText ("FUZZ", title.removeFromTop (58.0f), Justification::centred);
+    g.drawText ("GERMANIUM", sw.withSizeKeepingCentre (110.0f, 14.0f).withY (sw.getY() - 18.0f), Justification::centred);
+    g.drawText ("SILICON", sw.withSizeKeepingCentre (110.0f, 14.0f).withY (sw.getBottom() + 4.0f), Justification::centred);
+
+    // Portrait.
+    if (portrait.isValid())
+    {
+        g.drawImage (portrait, portraitArea, RectanglePlacement::centred);
+        // Fade the bottom of the photo into the enclosure.
+        const auto fade = portraitArea.withTop (portraitArea.getBottom() - 70.0f).expanded (2.0f, 1.0f);
+        g.setGradientFill (ColourGradient (enclosureBottom.withAlpha (0.0f), fade.getX(), fade.getY(),
+                                           Colour (0xff0f0f0f), fade.getX(), fade.getBottom(), false));
+        g.fillRect (fade);
+    }
+
+    // Title block.
+    const float titleY = portraitArea.getBottom() - 6.0f;
+    g.setColour (Colours::black.withAlpha (0.7f));
+    g.setFont (boldFont (48.0f).withHorizontalScale (0.9f));
+    g.drawText ("PHIL'S FUZZ", Rectangle<float> (box.getX() + 2.0f, titleY + 3.0f, box.getWidth(), 52.0f), Justification::centred);
+    g.setColour (silkscreen);
+    g.drawText ("PHIL'S FUZZ", Rectangle<float> (box.getX(), titleY, box.getWidth(), 52.0f), Justification::centred);
 
     g.setColour (silkscreen.withAlpha (0.6f));
     g.setFont (boldFont (11.0f));
-    g.drawText ("-  SEVENTIES FUZZ BOX  -", Rectangle<float> (box.getX(), 356.0f, box.getWidth(), 16.0f),
+    g.drawText ("-  SEVENTIES FUZZ BOX  -", Rectangle<float> (box.getX(), titleY + 52.0f, box.getWidth(), 16.0f),
                 Justification::centred);
 }
 
@@ -227,6 +362,17 @@ void HairyFuzzEditor::resized()
     filterKnob.setBounds (2 * gap + knobSize, knobTop, knobSize, knobSize);
     volumeKnob.setBounds (3 * gap + 2 * knobSize, knobTop, knobSize, knobSize);
 
-    ledArea = { editorWidth * 0.5f - 7.0f, 196.0f, 14.0f, 14.0f };
-    footswitch.setBounds (editorWidth / 2 - 42, 392, 84, 84);
+    modeKnob.setBounds (juce::Rectangle<int> ((int) modeSize, (int) modeSize)
+                            .withCentre ({ (int) modeCentreX, (int) modeCentreY }));
+    diodeSwitch.setBounds (juce::Rectangle<int> (34, 58).withCentre ({ 278, (int) modeCentreY }));
+
+    const float portraitHeight = 262.0f;
+    const float portraitWidth = portrait.isValid()
+                                    ? portraitHeight * (float) portrait.getWidth() / (float) portrait.getHeight()
+                                    : portraitHeight * 0.67f;
+    portraitArea = juce::Rectangle<float> (portraitWidth, portraitHeight)
+                       .withCentre ({ editorWidth * 0.5f, 300.0f + portraitHeight * 0.5f });
+
+    ledArea = { editorWidth * 0.5f - 7.0f, 632.0f, 14.0f, 14.0f };
+    footswitch.setBounds (editorWidth / 2 - 42, 652, 84, 84);
 }

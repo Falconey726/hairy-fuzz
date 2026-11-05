@@ -1,12 +1,19 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+const juce::StringArray HairyFuzzProcessor::modeNames { "Vintage", "Hairy", "Sustain", "Octave", "Dist", "Drive" };
+
 namespace
 {
-constexpr float stageBias = 0.22f;
-
-float gainStage1 (float fuzz) { return juce::Decibels::decibelsToGain (6.0f + 32.0f * fuzz); }
-float gainStage2 (float fuzz) { return juce::Decibels::decibelsToGain (3.0f + 22.0f * fuzz); }
+// Output trim per voice (mode x germanium/silicon) so switching modes keeps a similar loudness.
+constexpr std::array<float, fuzz::FuzzChannel::numVoices> voiceTrimDb {
+    3.7f, 0.9f,   // vintage  (germanium, silicon)
+    0.5f, -3.4f,  // hairy
+    3.8f, -0.5f,  // sustain
+    2.6f, -1.4f,  // octave
+    2.8f, -1.1f,  // dist
+    3.0f, 1.0f    // drive
+};
 
 // Filter works like the RAT: turning it up makes the sound darker.
 float filterCutoff (float filter) { return 14000.0f * std::pow (450.0f / 14000.0f, filter); }
@@ -27,6 +34,8 @@ HairyFuzzProcessor::HairyFuzzProcessor()
     filterValue = apvts.getRawParameterValue ("filter");
     volumeValue = apvts.getRawParameterValue ("volume");
     bypassValue = apvts.getRawParameterValue ("bypass");
+    modeValue = apvts.getRawParameterValue ("mode");
+    siliconValue = apvts.getRawParameterValue ("silicon");
     bypassParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter ("bypass"));
 }
 
@@ -43,7 +52,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout HairyFuzzProcessor::createLa
                                                NormalisableRange<float> (0.0f, 1.0f), 0.35f, percent),
         std::make_unique<AudioParameterFloat> (ParameterID { "volume", 1 }, "Volume",
                                                NormalisableRange<float> (0.0f, 1.0f), 0.7f, percent),
-        std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, "Bypass", false)
+        std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, "Bypass", false),
+        std::make_unique<AudioParameterChoice> (ParameterID { "mode", 1 }, "Mode", modeNames, 1),
+        std::make_unique<AudioParameterBool> (ParameterID { "silicon", 1 }, "Diode", false,
+            AudioParameterBoolAttributes().withStringFromValueFunction (
+                [] (bool si, int) { return si ? String ("Silicon") : String ("Germanium"); }))
     };
 }
 
@@ -85,6 +98,11 @@ void HairyFuzzProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     filterSmooth.setCurrentAndTargetValue (filterValue->load());
     volumeSmooth.setCurrentAndTargetValue (volumeValue->load());
     wetSmooth.setCurrentAndTargetValue (bypassValue->load() > 0.5f ? 0.0f : 1.0f);
+
+    currentVoice = fuzz::FuzzChannel::voiceIndex ((int) modeValue->load(), siliconValue->load() > 0.5f);
+    previousVoice = -1;
+    fadeLength = juce::jmax (1, (int) (osRate * 0.015f));
+    fadePos = fadeLength;
 }
 
 void HairyFuzzProcessor::reset()
@@ -140,6 +158,17 @@ void HairyFuzzProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     volumeSmooth.setTargetValue (volumeValue->load());
     wetSmooth.setTargetValue (bypassValue->load() > 0.5f ? 0.0f : 1.0f);
 
+    const int targetVoice = fuzz::FuzzChannel::voiceIndex (
+        juce::jlimit (0, fuzz::numModes - 1, (int) modeValue->load()), siliconValue->load() > 0.5f);
+    if (targetVoice != currentVoice && fadePos >= fadeLength)
+    {
+        previousVoice = currentVoice;
+        currentVoice = targetVoice;
+        for (auto& ch : channels)
+            ch.voices[(size_t) currentVoice].reset();
+        fadePos = 0;
+    }
+
     // Wet path: upsample, run the circuit, downsample.
     juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(), (size_t) numChannels,
                                         (size_t) numSamples);
@@ -148,15 +177,25 @@ void HairyFuzzProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
     for (size_t i = 0; i < osSamples; ++i)
     {
-        const float f = fuzzSmooth.getNextValue();
-        const float g1 = gainStage1 (f);
-        const float g2 = gainStage2 (f);
+        const float drive = fuzzSmooth.getNextValue();
         const float cutoff = filterCutoff (filterSmooth.getNextValue());
+        const bool fading = fadePos < fadeLength;
+        const float newGain = fading ? (float) fadePos / (float) fadeLength : 1.0f;
+        if (fading)
+            ++fadePos;
+
+        const float curTrim = juce::Decibels::decibelsToGain (voiceTrimDb[(size_t) currentVoice]);
+        const float prevTrim = previousVoice >= 0 ? juce::Decibels::decibelsToGain (voiceTrimDb[(size_t) previousVoice]) : 0.0f;
 
         for (int ch = 0; ch < numChannels; ++ch)
         {
             float* data = osBlock.getChannelPointer ((size_t) ch);
-            data[i] = channels[(size_t) ch].process (data[i], g1, g2, stageBias, cutoff);
+            auto& voices = channels[(size_t) ch].voices;
+            const float x = data[i];
+            float y = curTrim * voices[(size_t) currentVoice].process (x, drive, cutoff);
+            if (fading && previousVoice >= 0)
+                y = newGain * y + (1.0f - newGain) * prevTrim * voices[(size_t) previousVoice].process (x, drive, cutoff);
+            data[i] = y;
         }
     }
 

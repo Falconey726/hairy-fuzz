@@ -7,6 +7,8 @@
 class HairyFuzzProcessor : public juce::AudioProcessor
 {
 public:
+    static const juce::StringArray modeNames;
+
     HairyFuzzProcessor();
     ~HairyFuzzProcessor() override = default;
 
@@ -55,6 +57,12 @@ private:
     std::atomic<float>* filterValue = nullptr;
     std::atomic<float>* volumeValue = nullptr;
     std::atomic<float>* bypassValue = nullptr;
+    std::atomic<float>* modeValue = nullptr;
+    std::atomic<float>* siliconValue = nullptr;
+
+    // Mode / diode switching crossfades between two independent voices.
+    int currentVoice = -1, previousVoice = -1;
+    int fadePos = 0, fadeLength = 1;
     juce::AudioParameterBool* bypassParam = nullptr;
 
     juce::SmoothedValue<float> fuzzSmooth, filterSmooth;    // oversampled rate

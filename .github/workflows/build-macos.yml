@@ -20,26 +20,26 @@ jobs:
 
       - name: Ad-hoc sign
         run: |
-          ART="build/HairyFuzz_artefacts/Release"
-          codesign --force --deep --sign - "$ART/AU/Hairy Fuzz.component"
-          codesign --force --deep --sign - "$ART/VST3/Hairy Fuzz.vst3"
+          ART="build/PhilsFuzz_artefacts/Release"
+          codesign --force --deep --sign - "$ART/AU/Phils Fuzz.component"
+          codesign --force --deep --sign - "$ART/VST3/Phils Fuzz.vst3"
 
       - name: Validate the Audio Unit with auval
         run: |
           mkdir -p ~/Library/Audio/Plug-Ins/Components
-          cp -R "build/HairyFuzz_artefacts/Release/AU/Hairy Fuzz.component" ~/Library/Audio/Plug-Ins/Components/
+          cp -R "build/PhilsFuzz_artefacts/Release/AU/Phils Fuzz.component" ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
-          auval -a | grep -i hfzz || true
-          auval -strict -v aufx Hfzz Flcn
+          auval -a | grep -i phfz || true
+          auval -strict -v aufx Phfz Flcn
 
       - name: Package
         run: |
-          mkdir -p dist/HairyFuzz
-          cp -R "build/HairyFuzz_artefacts/Release/AU/Hairy Fuzz.component" dist/HairyFuzz/
-          cp -R "build/HairyFuzz_artefacts/Release/VST3/Hairy Fuzz.vst3" dist/HairyFuzz/
-          cp INSTALL.txt dist/HairyFuzz/
+          mkdir -p dist/PhilsFuzz
+          cp -R "build/PhilsFuzz_artefacts/Release/AU/Phils Fuzz.component" dist/PhilsFuzz/
+          cp -R "build/PhilsFuzz_artefacts/Release/VST3/Phils Fuzz.vst3" dist/PhilsFuzz/
+          cp INSTALL.txt dist/PhilsFuzz/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HairyFuzz-macOS
-          path: dist/HairyFuzz
+          name: PhilsFuzz-macOS
+          path: dist/PhilsFuzz
