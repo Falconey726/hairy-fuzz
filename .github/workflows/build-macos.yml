@@ -1,0 +1,45 @@
+name: Build macOS plugin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (universal build for Apple Silicon and Intel)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Ad-hoc sign
+        run: |
+          ART="build/PhilsFuzz_artefacts/Release"
+          codesign --force --deep --sign - "$ART/AU/Phils Fuzz.component"
+          codesign --force --deep --sign - "$ART/VST3/Phils Fuzz.vst3"
+
+      - name: Validate the Audio Unit with auval
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/PhilsFuzz_artefacts/Release/AU/Phils Fuzz.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -a | grep -i phfz || true
+          auval -strict -v aufx Phfz Flcn
+
+      - name: Package
+        run: |
+          mkdir -p dist/PhilsFuzz
+          cp -R "build/PhilsFuzz_artefacts/Release/AU/Phils Fuzz.component" dist/PhilsFuzz/
+          cp -R "build/PhilsFuzz_artefacts/Release/VST3/Phils Fuzz.vst3" dist/PhilsFuzz/
+          cp INSTALL.txt dist/PhilsFuzz/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhilsFuzz-macOS
+          path: dist/PhilsFuzz

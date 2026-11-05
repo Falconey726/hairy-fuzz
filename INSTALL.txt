@@ -1,0 +1,17 @@
+PHIL'S FUZZ - install on macOS
+==============================
+
+0. If you installed the earlier "Hairy Fuzz" test version, delete
+     ~/Library/Audio/Plug-Ins/Components/Hairy Fuzz.component
+
+1. Copy "Phils Fuzz.component" into:
+     ~/Library/Audio/Plug-Ins/Components/
+   (In Finder: Go menu > Go to Folder..., paste the path above.)
+   Optional: copy "Phils Fuzz.vst3" into ~/Library/Audio/Plug-Ins/VST3/
+
+2. macOS blocks plugins downloaded from the internet that are not notarised.
+   Open Terminal and run:
+     xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"Phils Fuzz.component"
+
+3. In Ableton Live: Settings > Plug-Ins, make sure "Use Audio Units v2" is on,
+   then click "Rescan". Phil's Fuzz appears under Plug-Ins > Audio Units > Falconey.
